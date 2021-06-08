@@ -167,7 +167,7 @@ func (p *Parser) statement() error {
 			if err != nil {
 				return err
 			}
-			p.emitter.emit(")")
+			p.emitter.emit(");")
 		}
 	case p.checkToken(IF):
 		log.Print("STATEMENT-IF")
