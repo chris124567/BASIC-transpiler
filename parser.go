@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"go/format"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Emitter struct {
@@ -42,15 +44,16 @@ func (e *Emitter) write() error {
 	}
 	importString += ");"
 
-	toWrite := []string{"package main\n", importString, "func main() {", e.function, "}"}
-
-	for _, w := range toWrite {
-		_, err = file.WriteString(w)
-		if err != nil {
-			return err
-		}
+	code := strings.Join([]string{"package main\n", importString, "func main() {", e.function, "}"}, "")
+	formatted, err := format.Source([]byte(code))
+	if err != nil {
+		return err
 	}
 
+	_, err = file.Write(formatted)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

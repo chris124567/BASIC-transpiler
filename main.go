@@ -12,7 +12,6 @@ func main() {
 	source := `
 PRINT "How many fibonacci numbers do you want?"
 INPUT nums
-
 LET a = 0
 LET b = 1
 WHILE nums > 0 REPEAT
@@ -21,7 +20,7 @@ WHILE nums > 0 REPEAT
     LET a = b
     LET b = c
     LET nums = nums - 1
-ENDWHILE	
+ENDWHILE
 	`
 
 	lexer := NewLexer([]byte(source))
