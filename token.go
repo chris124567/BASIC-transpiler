@@ -15,9 +15,12 @@ const (
 	IF
 	THEN
 	ENDIF
+	ELSE
+	FOR
 	WHILE
 	REPEAT
 	ENDWHILE
+	ENDFOR
 	// Operators
 	EQ
 	PLUS
@@ -45,9 +48,12 @@ var TOKENS = map[int]string{
 	IF:       "IF",
 	THEN:     "THEN",
 	ENDIF:    "ENDIF",
+	ELSE:     "ELSE",
+	FOR:      "FOR",
 	WHILE:    "WHILE",
 	REPEAT:   "REPEAT",
 	ENDWHILE: "ENDWHILE",
+	ENDFOR:   "ENDFOR",
 	EQ:       "EQ",
 	PLUS:     "+",
 	MINUS:    "-",

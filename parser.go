@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var _ = log.Print
+
 type Emitter struct {
 	fullPath string
 	imports  map[string]bool
@@ -78,7 +80,7 @@ type Parser struct {
 	labelsGotoed   map[string]bool
 }
 
-func NewParser(lexer *Lexer, emitter *Emitter) (*Parser, error) {
+func NewParser(lexer *Lexer, emitter *Emitter) *Parser {
 	parser := &Parser{
 		lexer:          lexer,
 		emitter:        emitter,
@@ -86,15 +88,9 @@ func NewParser(lexer *Lexer, emitter *Emitter) (*Parser, error) {
 		labelsDeclared: make(map[string]bool),
 		labelsGotoed:   make(map[string]bool),
 	}
-	err := parser.nextToken()
-	if err != nil {
-		return nil, err
-	}
-	err = parser.nextToken()
-	if err != nil {
-		return nil, err
-	}
-	return parser, nil
+	parser.nextToken()
+	parser.nextToken()
+	return parser
 }
 
 func (p *Parser) checkToken(kind int) bool {
@@ -105,170 +101,129 @@ func (p *Parser) checkPeekToken(kind int) bool {
 	return p.peekToken.kind == kind
 }
 
-func (p *Parser) match(kind int) error {
+func (p *Parser) match(kind int) {
 	if !p.checkToken(kind) {
-		return fmt.Errorf("Expected %d, got %d", kind, p.currentToken.kind)
+		log.Panicf("Expected %d, got %d", kind, p.currentToken.kind)
 	}
-	return p.nextToken()
+	p.nextToken()
 }
 
-func (p *Parser) nextToken() error {
+func (p *Parser) nextToken() {
 	p.currentToken = p.peekToken
 	token, err := p.lexer.getToken()
 	if err != nil {
-		return err
+		panic(err)
 	}
 	p.peekToken = token
-	return nil
 }
 
 // program ::= {statement}
-func (p *Parser) program() error {
-	log.Print("PROGRAM")
-
-	err := p.nl()
-	if err != nil {
-		return err
-	}
+func (p *Parser) program() {
+	// p.nl()
 
 	for !p.checkToken(EOF) {
-		err := p.statement()
-		if err != nil {
-			return err
-		}
+		p.statement()
 	}
 
 	for label := range p.labelsGotoed {
 		if !p.labelsDeclared[label] {
-			return fmt.Errorf("attempting to GOTO undeclared label: %s", label)
+			log.Panicf("attempting to GOTO undeclared label: %s", label)
 		}
 	}
-	return nil
 }
 
-func (p *Parser) statement() error {
-	var err error
+func (p *Parser) statement() {
 	switch {
 	case p.checkToken(PRINT):
 		log.Print("STATEMENT-PRINT")
 
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
 		if p.checkToken(STRING) {
 			p.emitter.addImport("fmt")
 			p.emitter.emitLine(fmt.Sprintf(`fmt.Println("%s");`, p.currentToken.text))
-			err = p.nextToken()
-			if err != nil {
-				return err
-			}
+			p.nextToken()
 		} else {
 			p.emitter.emit(`fmt.Printf("%v\n",`)
 
-			err = p.expression()
-			if err != nil {
-				return err
-			}
+			p.expression()
 			p.emitter.emit(");")
 		}
 	case p.checkToken(IF):
 		log.Print("STATEMENT-IF")
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
+
+		p.nextToken()
 		p.emitter.emit("if ")
 
-		err = p.comparison()
-		if err != nil {
-			return err
-		}
+		p.comparison()
 		p.emitter.emitLine("{")
 
-		err = p.match(THEN)
-		if err != nil {
-			return err
+		p.match(THEN)
+		for !p.checkToken(ENDIF) && !p.checkToken(ELSE) {
+			p.statement()
 		}
-		for !p.checkToken(ENDIF) {
-			err = p.statement()
-			if err != nil {
-				return err
+		// no else
+		if p.checkToken(ENDIF) {
+			p.emitter.emitLine("}")
+		} else if p.checkToken(ELSE) {
+			p.nextToken()
+			p.emitter.emitLine("\n}else {")
+			for !p.checkToken(ENDIF) {
+				p.statement()
 			}
+			p.match(ENDIF)
+			p.emitter.emitLine("}")
+
+		} else {
+			log.Panicf("expected endif or else but got: %v", p.currentToken)
 		}
-		err = p.match(ENDIF)
-		if err != nil {
-			return err
-		}
-		p.emitter.emitLine("}")
+	case p.checkToken(FOR):
+		log.Print("STATEMENT-FOR")
+		// todo: FOR i := 0; i < x; i++ support
+		fallthrough
 	case p.checkToken(WHILE):
 		log.Print("STATEMENT-WHILE")
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
+
+		isFor := p.checkToken(FOR)
+		p.nextToken()
 		p.emitter.emit("for ")
 
-		err = p.comparison()
-		if err != nil {
-			return err
-		}
+		p.comparison()
 		p.emitter.emitLine("{")
 
-		err = p.match(REPEAT)
-		if err != nil {
-			return err
-		}
-		err = p.nl()
-		if err != nil {
-			return err
+		p.match(REPEAT)
+		p.nl()
+		for (!isFor && !p.checkToken(ENDWHILE)) || (isFor && !p.checkToken(ENDFOR)) {
+			p.statement()
 		}
 
-		for !p.checkToken(ENDWHILE) {
-			err = p.statement()
-			if err != nil {
-				return err
-			}
-		}
-		err = p.match(ENDWHILE)
-		if err != nil {
-			return err
-		}
 		p.emitter.emitLine("}")
+		if p.checkToken(ENDWHILE) || p.checkToken(ENDFOR) {
+			p.nextToken()
+		} else {
+			log.Panicf("expected endwhile or endfor but got: %v", p.currentToken)
+		}
 	case p.checkToken(LABEL):
 		log.Print("STATEMENT-LABEL")
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
+
+		p.nextToken()
 		if p.labelsDeclared[p.currentToken.text] {
-			return fmt.Errorf("label %s already exists", p.currentToken.text)
+			log.Panicf("label %s already exists", p.currentToken.text)
 		}
 		p.labelsDeclared[p.currentToken.text] = true
 
 		p.emitter.emitLine(p.currentToken.text + ":")
-		err = p.match(IDENT)
-		if err != nil {
-			return err
-		}
+		p.match(IDENT)
 	case p.checkToken(GOTO):
 		log.Print("STATEMENT-GOTO")
+
 		p.nextToken()
-		if err != nil {
-			return err
-		}
 		p.labelsGotoed[p.currentToken.text] = true
 		p.emitter.emitLine("goto " + p.currentToken.text)
-		err = p.match(IDENT)
-		if err != nil {
-			return err
-		}
+		p.match(IDENT)
 	case p.checkToken(LET):
 		log.Print("STATEMENT-LET")
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
+
+		p.nextToken()
 
 		seen := p.symbols[p.currentToken.text]
 		if !seen {
@@ -276,15 +231,9 @@ func (p *Parser) statement() error {
 		}
 		name := p.currentToken.text
 
-		err = p.match(IDENT)
-		if err != nil {
-			return err
-		}
+		p.match(IDENT)
 
-		err = p.match(EQ)
-		if err != nil {
-			return err
-		}
+		p.match(EQ)
 
 		if seen {
 			p.emitter.emit(name + " = ")
@@ -292,20 +241,15 @@ func (p *Parser) statement() error {
 			p.emitter.emit(name + " := ")
 		}
 
-		err = p.expression()
-		if err != nil {
-			return err
-		}
+		p.expression()
 		p.emitter.emit(";")
 
 	case p.checkToken(INPUT):
 		log.Print("STATEMENT-INPUT")
+
 		p.emitter.addImport("fmt")
 
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
 
 		name := p.currentToken.text
 		seen := p.symbols[name]
@@ -313,10 +257,7 @@ func (p *Parser) statement() error {
 			p.symbols[name] = true
 		}
 
-		err = p.match(IDENT)
-		if err != nil {
-			return err
-		}
+		p.match(IDENT)
 
 		if seen {
 			p.emitter.emitLine(fmt.Sprintf(`fmt.Scanf("%%f", &%s);`, name))
@@ -325,133 +266,81 @@ func (p *Parser) statement() error {
 
 		}
 	default:
-		return fmt.Errorf("Invalid statement at %s (%s)", p.currentToken.text, TOKENS[p.currentToken.kind])
+		log.Panicf("Invalid statement at %s (%s)", p.currentToken.text, TOKENS[p.currentToken.kind])
 	}
-	return p.nl()
+	p.nl()
 }
 
 // expression ::= term {( "-" | "+" ) term}
-func (p *Parser) expression() error {
-	log.Print("EXPRESSION")
-	err := p.term()
-	if err != nil {
-		return err
-	}
+func (p *Parser) expression() {
+	p.term()
 
 	for p.checkToken(PLUS) || p.checkToken(MINUS) {
 		p.emitter.emit(p.currentToken.text)
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
-		err = p.term()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
+		p.term()
 	}
-	return nil
 }
 
 // comparison ::= expression (("==" | "!=" | ">" | ">=" | "<" | "<=") expression)+
-func (p *Parser) comparison() error {
-	log.Print("COMPARISON")
-	err := p.expression()
-	if err != nil {
-		return err
-	}
+func (p *Parser) comparison() {
+	p.expression()
 	if p.currentToken.isComparisonOperator() {
 		p.emitter.emit(p.currentToken.text)
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
-		err = p.expression()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
+		p.expression()
 	} else {
-		return fmt.Errorf("Expected comparison operator at: %s", p.currentToken.text)
+		log.Panicf("Expected comparison operator at: %s", p.currentToken.text)
 	}
 
 	for p.currentToken.isComparisonOperator() {
 		p.emitter.emit(p.currentToken.text)
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
-		err = p.expression()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
+		p.expression()
 	}
 
-	return nil
 }
 
 // term ::= unary {( "/" | "*" ) unary}
-func (p *Parser) term() error {
-	log.Print("TERM")
-	err := p.unary()
-	if err != nil {
-		return err
-	}
+func (p *Parser) term() {
+	p.unary()
 	for p.checkToken(ASTERISK) || p.checkToken(SLASH) {
 		p.emitter.emit(p.currentToken.text)
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
-		err = p.unary()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
+		p.unary()
 	}
-	return nil
 }
 
 // unary ::= ["+" | "-"] primary
-func (p *Parser) unary() error {
-	log.Print("UNARY")
-
+func (p *Parser) unary() {
 	if p.checkToken(PLUS) || p.checkToken(MINUS) {
 		p.emitter.emit(p.currentToken.text)
-		err := p.nextToken()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
 	}
-	return p.primary()
+	p.primary()
 }
 
-func (p *Parser) primary() error {
-	log.Printf("Primary (%s)", p.currentToken.text)
+func (p *Parser) primary() {
 	if p.checkToken(NUMBER) {
 		p.emitter.emit("float64(" + p.currentToken.text + ")")
-		return p.nextToken()
+		p.nextToken()
+	} else if p.checkToken(STRING) {
+		p.emitter.emit(`"` + p.currentToken.text + `"`)
+		p.nextToken()
 	} else if p.checkToken(IDENT) {
 		if !p.symbols[p.currentToken.text] {
-			return fmt.Errorf("referencing variable before assignment: %s", p.currentToken.text)
+			log.Panicf("referencing variable before assignment: %s", p.currentToken.text)
 		}
 		p.emitter.emit(p.currentToken.text)
-		return p.nextToken()
+		p.nextToken()
 	} else {
-		return fmt.Errorf("unexpected token at %s", p.currentToken.text)
+		log.Panicf("unexpected token at %s", p.currentToken.text)
 	}
 }
 
 // nl ::= '\n'+
-func (p *Parser) nl() error {
-	log.Print("NEWLINE")
-
-	err := p.match(NEWLINE)
-	if err == nil {
-		return nil
-	}
+func (p *Parser) nl() {
 	for p.checkToken(NEWLINE) {
-		err = p.nextToken()
-		if err != nil {
-			return err
-		}
+		p.nextToken()
 	}
-	return nil
 }
